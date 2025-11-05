@@ -17,7 +17,6 @@ import re
 import time
 from typing import Optional, Dict, List
 from pydantic import BaseModel, Field, validator
-from functools import lru_cache
 
 # Set up logging
 logging.basicConfig(
@@ -25,6 +24,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
 
 # Security constants and configuration
 class SecurityConstants:
@@ -34,6 +34,14 @@ class SecurityConstants:
     LOCKOUT_DURATION_MINUTES = 15
     VALID_USER_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{3,50}$')
     VALID_DEVICE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{8,100}$')
+
+
+class APIEndpoints:
+    """API endpoint constants"""
+    AUTH_LOGIN = "/api/v1/auth/login"
+    AUTH_LOGOUT = "/api/v1/auth/logout"
+    AUTH_TOKEN = "/api/v1/auth/token"
+
 
 # Rate limiting storage
 class RateLimiter:
@@ -80,9 +88,12 @@ class RateLimiter:
         self.attempts[identifier].append(now)
         
         # If max attempts reached, set lockout
-        if len(self.attempts[identifier]) >= SecurityConstants.MAX_LOGIN_ATTEMPTS:
-            lockout_until = now + (SecurityConstants.LOCKOUT_DURATION_MINUTES * 60)
+        max_attempts = SecurityConstants.MAX_LOGIN_ATTEMPTS
+        if len(self.attempts[identifier]) >= max_attempts:
+            lockout_duration = SecurityConstants.LOCKOUT_DURATION_MINUTES * 60
+            lockout_until = now + lockout_duration
             self.lockouts[identifier] = lockout_until
+
 
 # Initialize rate limiter
 rate_limiter = RateLimiter()
@@ -106,8 +117,8 @@ app = FastAPI(
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=[
-        "localhost", 
-        "127.0.0.1", 
+        "localhost",
+        "127.0.0.1",
         "*.localhost",
         # Add your production domains here
     ]
@@ -449,14 +460,18 @@ class EnterpriseAuth:
             # In production, use proper JWT library with RSA-256 verification
             parts = token.split('.')
             if len(parts) < 2:
-                logger.warning("Token validation failed: Invalid token structure")
+                logger.warning(
+                    "Token validation failed: Invalid token structure"
+                )
                 return None
                 
             session_id = parts[0]
             
             # Validate session ID format
             if not re.match(r'^[A-Za-z0-9_-]+$', session_id):
-                logger.warning("Token validation failed: Invalid session ID format")
+                logger.warning(
+                    "Token validation failed: Invalid session ID format"
+                )
                 return None
             
             if session_id in self.active_sessions:
@@ -464,10 +479,13 @@ class EnterpriseAuth:
                 expires_at = datetime.fromisoformat(session['expires_at'])
                 
                 if datetime.now() < expires_at:
-                    # Additional security: verify token hasn't been tampered with
+                    # Additional security: verify token hasn't been
+                    # tampered with
                     expected_token = f"{session_id}.demo.token"
                     if token != expected_token:
-                        logger.warning("Token validation failed: Token mismatch")
+                        logger.warning(
+                            "Token validation failed: Token mismatch"
+                        )
                         return None
                     
                     return TokenPayload(**session['payload'])
@@ -580,7 +598,7 @@ def get_current_user(
 # Enterprise Authentication Endpoints
 
 
-@app.post("/api/v1/auth/login")
+@app.post(APIEndpoints.AUTH_LOGIN)
 async def enterprise_login(login_data: LoginRequest):
     """Secure Enterprise OIDC/OAuth2 Login Endpoint with Rate Limiting"""
     # Rate limiting check
@@ -588,8 +606,10 @@ async def enterprise_login(login_data: LoginRequest):
     rate_limit_key = f"{client_ip}:{login_data.user_id}"
     
     if rate_limiter.is_rate_limited(rate_limit_key):
-        enterprise_auth.log_audit_event("RATE_LIMITED", "/api/v1/auth/login", 429, 
-                                       login_data.user_id, login_data.device_id)
+        enterprise_auth.log_audit_event(
+            "RATE_LIMITED", APIEndpoints.AUTH_LOGIN, 429,
+            login_data.user_id, login_data.device_id
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Please try again later."
@@ -597,14 +617,16 @@ async def enterprise_login(login_data: LoginRequest):
     
     try:
         # Validate input format
-        if not SecurityConstants.VALID_USER_ID_PATTERN.match(login_data.user_id):
+        user_id_pattern = SecurityConstants.VALID_USER_ID_PATTERN
+        if not user_id_pattern.match(login_data.user_id):
             rate_limiter.record_attempt(rate_limit_key, failed=True)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid user ID format"
             )
         
-        if not SecurityConstants.VALID_DEVICE_ID_PATTERN.match(login_data.device_id):
+        device_id_pattern = SecurityConstants.VALID_DEVICE_ID_PATTERN
+        if not device_id_pattern.match(login_data.device_id):
             rate_limiter.record_attempt(rate_limit_key, failed=True)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -613,7 +635,9 @@ async def enterprise_login(login_data: LoginRequest):
         
         # In production, integrate with OIDC/OAuth2 provider
         # For demo purposes, we'll accept any valid format
-        token = enterprise_auth.create_session(login_data.user_id, login_data.device_id)
+        token = enterprise_auth.create_session(
+            login_data.user_id, login_data.device_id
+        )
         
         # Record successful login
         rate_limiter.record_attempt(rate_limit_key, failed=False)
@@ -627,16 +651,20 @@ async def enterprise_login(login_data: LoginRequest):
         }
     except ValueError as exc:
         rate_limiter.record_attempt(rate_limit_key, failed=True)
-        enterprise_auth.log_audit_event("LOGIN_FAILED", "/api/v1/auth/login",
-                                        400, login_data.user_id, login_data.device_id)
+        enterprise_auth.log_audit_event(
+            "LOGIN_FAILED", APIEndpoints.AUTH_LOGIN,
+            400, login_data.user_id, login_data.device_id
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Authentication failed"
         ) from exc
     except Exception as exc:
         rate_limiter.record_attempt(rate_limit_key, failed=True)
-        enterprise_auth.log_audit_event("LOGIN_ERROR", "/api/v1/auth/login",
-                                        500, login_data.user_id, login_data.device_id)
+        enterprise_auth.log_audit_event(
+            "LOGIN_ERROR", APIEndpoints.AUTH_LOGIN,
+            500, login_data.user_id, login_data.device_id
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service error"
