@@ -1,0 +1,259 @@
+# AetherEdge Prometheus Alerting Rules
+groups:
+  - name: aetheredge.infrastructure
+    rules:
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High CPU usage detected"
+          description: "Instance {{ $labels.instance }} has high CPU usage ({{ $value }}%)"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High memory usage detected"
+          description: "Instance {{ $labels.instance }} has high memory usage ({{ $value }}%)"
+
+      # High Disk Usage
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          service: infrastructure
+        annotations:
+          summary: "High disk usage detected"
+          description: "Instance {{ $labels.instance }} disk {{ $labels.mountpoint }} has high usage ({{ $value }}%)"
+
+      # Service Down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: "{{ $labels.job }}"
+        annotations:
+          summary: "Service is down"
+          description: "Service {{ $labels.job }} on instance {{ $labels.instance }} is down"
+
+  - name: aetheredge.database
+    rules:
+      # PostgreSQL Down
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is not responding"
+
+      # High Database Connections
+      - alert: HighDatabaseConnections
+        expr: pg_stat_activity_count / pg_settings_max_connections * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High database connection usage"
+          description: "PostgreSQL has high connection usage ({{ $value }}%)"
+
+      # Redis Down
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: cache
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache is not responding"
+
+      # High Redis Memory Usage
+      - alert: HighRedisMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: cache
+        annotations:
+          summary: "High Redis memory usage"
+          description: "Redis memory usage is high ({{ $value }}%)"
+
+  - name: aetheredge.applications
+    rules:
+      # High API Response Time
+      - alert: HighAPIResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "High API response time"
+          description: "95th percentile response time is {{ $value }}s for {{ $labels.job }}"
+
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "High API error rate"
+          description: "Error rate is {{ $value }}% for {{ $labels.job }}"
+
+      # High Request Rate
+      - alert: HighRequestRate
+        expr: rate(http_requests_total[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "High API request rate"
+          description: "Request rate is {{ $value }} req/s for {{ $labels.job }}"
+
+  - name: aetheredge.security
+    rules:
+      # High Security Threats
+      - alert: HighSecurityThreats
+        expr: increase(aetheredge_security_threats_total{severity="high"}[5m]) > 10
+        for: 1m
+        labels:
+          severity: critical
+          service: security
+        annotations:
+          summary: "High number of security threats detected"
+          description: "{{ $value }} high-severity security threats detected in the last 5 minutes"
+
+      # Critical Security Threat
+      - alert: CriticalSecurityThreat
+        expr: increase(aetheredge_security_threats_total{severity="critical"}[1m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: security
+        annotations:
+          summary: "Critical security threat detected"
+          description: "Critical security threat detected: {{ $labels.threat_type }}"
+
+      # Security Compliance Low
+      - alert: SecurityComplianceLow
+        expr: aetheredge_security_compliance_score < 70
+        for: 10m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "Security compliance score is low"
+          description: "Security compliance score is {{ $value }}%"
+
+  - name: aetheredge.finops
+    rules:
+      # High Cost Anomaly
+      - alert: HighCostAnomaly
+        expr: increase(aetheredge_cost_anomaly_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: finops
+        annotations:
+          summary: "Cost anomaly detected"
+          description: "Unusual cost pattern detected for {{ $labels.service }}"
+
+      # Budget Threshold Exceeded
+      - alert: BudgetThresholdExceeded
+        expr: aetheredge_budget_usage_percentage > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: finops
+        annotations:
+          summary: "Budget threshold exceeded"
+          description: "Budget usage is {{ $value }}% for {{ $labels.budget_name }}"
+
+  - name: aetheredge.healing
+    rules:
+      # Healing Operation Failed
+      - alert: HealingOperationFailed
+        expr: increase(aetheredge_healing_operations_total{status="failed"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: healing
+        annotations:
+          summary: "Healing operation failed"
+          description: "{{ $value }} healing operations failed in the last 5 minutes"
+
+      # High Anomaly Score
+      - alert: HighAnomalyScore
+        expr: aetheredge_anomaly_score > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: healing
+        annotations:
+          summary: "High anomaly score detected"
+          description: "Anomaly score is {{ $value }} for {{ $labels.resource }}"
+
+  - name: aetheredge.orchestration
+    rules:
+      # Policy Compliance Failed
+      - alert: PolicyComplianceFailed
+        expr: increase(aetheredge_policy_violations_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: orchestration
+        annotations:
+          summary: "Multiple policy violations detected"
+          description: "{{ $value }} policy violations in the last 5 minutes"
+
+      # Workflow Execution Failed
+      - alert: WorkflowExecutionFailed
+        expr: increase(aetheredge_workflow_executions_total{status="failed"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: orchestration
+        annotations:
+          summary: "Workflow execution failed"
+          description: "Workflow {{ $labels.workflow_name }} execution failed"
+
+  - name: aetheredge.blueprint
+    rules:
+      # Blueprint Generation Failed
+      - alert: BlueprintGenerationFailed
+        expr: increase(aetheredge_blueprint_generations_total{status="failed"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: blueprint
+        annotations:
+          summary: "Blueprint generation failed"
+          description: "Blueprint generation failed for {{ $labels.cloud_provider }}"
+
+      # Low Infrastructure Score
+      - alert: LowInfrastructureScore
+        expr: aetheredge_infrastructure_score < 0.6
+        for: 10m
+        labels:
+          severity: warning
+          service: blueprint
+        annotations:
+          summary: "Low infrastructure score"
+          description: "Infrastructure score is {{ $value }} for {{ $labels.blueprint_name }}"
