@@ -1,0 +1,200 @@
+version: '3.8'
+
+services:
+  # Test Database
+  postgres-test:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: aetheredge_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Test Redis
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Test API Gateway
+  api-gateway-test:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile.test
+    environment:
+      - DATABASE_URL=postgresql://postgres:test_password@postgres-test:5432/aetheredge_test
+      - REDIS_URL=redis://redis-test:6379
+      - ENVIRONMENT=test
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./api-gateway:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Divine Module Tests
+  saraswati-test:
+    build:
+      context: ./modules/saraswati-knowledge
+      dockerfile: Dockerfile.test
+    environment:
+      - DATABASE_URL=postgresql://postgres:test_password@postgres-test:5432/aetheredge_test
+      - REDIS_URL=redis://redis-test:6379
+      - ENVIRONMENT=test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      - ./modules/saraswati-knowledge:/app
+
+  lakshmi-test:
+    build:
+      context: ./modules/lakshmi-finops
+      dockerfile: Dockerfile.test
+    environment:
+      - DATABASE_URL=postgresql://postgres:test_password@postgres-test:5432/aetheredge_test
+      - REDIS_URL=redis://redis-test:6379
+      - ENVIRONMENT=test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      - ./modules/lakshmi-finops:/app
+
+  kali-test:
+    build:
+      context: ./modules/kali-security
+      dockerfile: Dockerfile.test
+    environment:
+      - DATABASE_URL=postgresql://postgres:test_password@postgres-test:5432/aetheredge_test
+      - REDIS_URL=redis://redis-test:6379
+      - ENVIRONMENT=test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      - ./modules/kali-security:/app
+
+  hanuman-test:
+    build:
+      context: ./modules/hanuman-agents
+      dockerfile: Dockerfile.test
+    environment:
+      - DATABASE_URL=postgresql://postgres:test_password@postgres-test:5432/aetheredge_test
+      - REDIS_URL=redis://redis-test:6379
+      - ENVIRONMENT=test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      - ./modules/hanuman-agents:/app
+
+  ganesha-test:
+    build:
+      context: ./modules/ganesha-rca
+      dockerfile: Dockerfile.test
+    environment:
+      - DATABASE_URL=postgresql://postgres:test_password@postgres-test:5432/aetheredge_test
+      - REDIS_URL=redis://redis-test:6379
+      - ENVIRONMENT=test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      - ./modules/ganesha-rca:/app
+
+  # Integration Test Runner
+  test-runner:
+    build:
+      context: ./tests
+      dockerfile: Dockerfile
+    environment:
+      - API_GATEWAY_URL=http://api-gateway-test:8000
+      - DATABASE_URL=postgresql://postgres:test_password@postgres-test:5432/aetheredge_test
+      - REDIS_URL=redis://redis-test:6379
+      - ENVIRONMENT=test
+    depends_on:
+      api-gateway-test:
+        condition: service_healthy
+      saraswati-test:
+        condition: service_started
+      lakshmi-test:
+        condition: service_started
+      kali-test:
+        condition: service_started
+      hanuman-test:
+        condition: service_started
+      ganesha-test:
+        condition: service_started
+    volumes:
+      - ./tests:/app
+      - ./test-results:/app/results
+    command: ["python", "-m", "pytest", "integration/", "-v", "--tb=short", "--junitxml=results/integration-tests.xml"]
+
+  # Performance Test Runner
+  performance-test:
+    image: grafana/k6:latest
+    environment:
+      - TARGET_URL=http://api-gateway-test:8000
+    depends_on:
+      api-gateway-test:
+        condition: service_healthy
+    volumes:
+      - ./tests/performance:/scripts
+      - ./test-results:/results
+    command: ["run", "--out", "json=/results/performance.json", "/scripts/load-test.js"]
+
+  # Frontend Test Server
+  frontend-test:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile.test
+    environment:
+      - VITE_API_URL=http://api-gateway-test:8000
+      - NODE_ENV=test
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./ui:/app
+      - /app/node_modules
+    command: ["npm", "run", "test:ci"]
+
+volumes:
+  postgres_test_data:
+
+networks:
+  default:
+    name: aetheredge-test-network

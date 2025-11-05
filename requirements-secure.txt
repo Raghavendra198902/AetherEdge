@@ -1,0 +1,40 @@
+# 🔥 Indra Divine API Gateway Dependencies - SECURITY HARDENED
+# =============================================================
+# Updated with latest secure versions based on Snyk vulnerability scan
+
+# Core FastAPI - Updated to fix ReDoS vulnerability (CVE-2024-24762)
+fastapi>=0.109.1
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.18  # Fixed critical resource allocation issue
+
+# HTTP client for service communication
+httpx>=0.25.2
+
+# Authentication & Security - Updated to fix signature verification issues
+python-jose[cryptography]>=3.4.0  # Fixed CVE-2024-33663 and CVE-2024-33664
+passlib[bcrypt]>=1.7.4
+
+# Data validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Template engine security fixes
+jinja2>=3.1.6  # Fixed multiple XSS and template injection vulnerabilities
+
+# HTTP library security fixes  
+requests>=2.32.4  # Fixed sensitive information leakage
+
+# Build tools security fixes
+setuptools>=78.1.1  # Fixed code injection and directory traversal
+
+# Web framework security fixes
+starlette>=0.49.1  # Fixed ReDoS and resource allocation issues
+
+# HTTP client security fixes
+urllib3>=2.5.0  # Fixed open redirect vulnerability
+
+# Async framework security fixes
+anyio>=4.4.0  # Fixed race condition vulnerability
+
+# Development tools
+black>=24.3.0  # Fixed ReDoS vulnerability

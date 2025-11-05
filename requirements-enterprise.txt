@@ -1,0 +1,26 @@
+# 🔒 Enterprise Security Requirements for AetherEdge
+# ===================================================
+
+# Core FastAPI - Updated to fix ReDoS vulnerability (CVE-2024-24762)
+fastapi[all]>=0.109.1
+
+# HTTP server with WebSocket support
+uvicorn[standard]>=0.24.0
+
+# File upload support - Fixed critical resource allocation issue
+python-multipart>=0.0.18
+
+# Authentication & Security - Updated to fix signature verification issues
+python-jose[cryptography]>=3.4.0
+passlib[bcrypt]>=1.7.4
+
+# Enterprise Features
+pydantic>=2.0.0
+cryptography>=41.0.0
+pyjwt>=2.8.0
+
+# Optional Production Dependencies
+# redis>=5.0.0  # For session storage
+# sqlalchemy>=2.0.0  # For audit log persistence
+# prometheus-client>=0.17.0  # For metrics
+# structlog>=23.0.0  # For structured logging

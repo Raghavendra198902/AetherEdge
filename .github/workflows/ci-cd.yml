@@ -1,0 +1,425 @@
+name: 🚀 AetherEdge CI/CD Pipeline
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_NAME: aetheredge
+
+jobs:
+  # Security Scanning Phase
+  security-scan:
+    name: 🛡️ Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  # Code Quality Analysis
+  code-quality:
+    name: 📊 Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety mypy black flake8 pylint
+
+      - name: Run Bandit security analysis
+        run: bandit -r . -f json -o bandit-report.json || true
+
+      - name: Run Safety security analysis
+        run: safety check --json --output safety-report.json || true
+
+      - name: Run MyPy type checking
+        run: mypy . --ignore-missing-imports --show-error-codes || true
+
+      - name: Run Black code formatting check
+        run: black --check . || true
+
+      - name: Run Flake8 linting
+        run: flake8 . --count --show-source --statistics || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd ui
+          npm ci
+
+      - name: Run frontend linting
+        run: |
+          cd ui
+          npm run lint
+
+      - name: Run frontend type checking
+        run: |
+          cd ui
+          npm run typecheck
+
+  # Backend Testing
+  backend-tests:
+    name: 🧪 Backend Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aetheredge_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio httpx
+
+      - name: Run API Gateway tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/aetheredge_test
+          REDIS_URL: redis://localhost:6379
+        run: |
+          cd api-gateway
+          python -m pytest tests/ -v --cov=src --cov-report=xml
+
+      - name: Run Module tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/aetheredge_test
+          REDIS_URL: redis://localhost:6379
+        run: |
+          for module in modules/*/; do
+            if [ -d "$module/tests" ]; then
+              echo "Testing $module"
+              cd "$module"
+              python -m pytest tests/ -v --cov=src --cov-report=xml
+              cd - > /dev/null
+            fi
+          done
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Frontend Testing
+  frontend-tests:
+    name: 🎨 Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd ui
+          npm ci
+
+      - name: Run unit tests
+        run: |
+          cd ui
+          npm run test:coverage
+
+      - name: Build frontend
+        run: |
+          cd ui
+          npm run build
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ui/coverage
+
+  # Integration Tests
+  integration-tests:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aetheredge_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker images
+        run: |
+          docker-compose -f docker-compose.test.yml build
+
+      - name: Run integration tests
+        run: |
+          docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose -f docker-compose.test.yml down -v
+
+  # Build and Push Docker Images
+  build-and-push:
+    name: 🐳 Build & Push Images
+    runs-on: ubuntu-latest
+    needs: [security-scan, code-quality, integration-tests]
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      image-digest: ${{ steps.image.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push API Gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api-gateway
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}-api-gateway
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Divine Modules
+        run: |
+          for module in modules/*/; do
+            module_name=$(basename "$module")
+            echo "Building $module_name"
+            docker build -t ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}-$module_name:latest "$module"
+            docker push ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}-$module_name:latest
+          done
+
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ui
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}-frontend
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Deploy to Staging
+  deploy-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://staging.aetheredge.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy to ECS
+        run: |
+          # Update ECS service with new image
+          aws ecs update-service \
+            --cluster aetheredge-staging \
+            --service aetheredge-api-gateway \
+            --force-new-deployment
+
+      - name: Run smoke tests
+        run: |
+          # Wait for deployment to complete
+          sleep 120
+          # Run basic health checks
+          curl -f https://staging-api.aetheredge.com/health || exit 1
+          # Run critical path tests
+          npm run test:smoke -- --env staging
+
+  # Performance Testing
+  performance-tests:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup K6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run load tests
+        run: |
+          k6 run --out json=performance-results.json tests/performance/load-test.js
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: performance-results.json
+
+  # Deploy to Production
+  deploy-production:
+    name: 🌟 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, performance-tests]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://aetheredge.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Blue/Green Deployment
+        run: |
+          # Implement blue/green deployment strategy
+          ./scripts/deploy-production.sh
+
+      - name: Run production smoke tests
+        run: |
+          # Critical health checks
+          curl -f https://api.aetheredge.com/health || exit 1
+          npm run test:smoke -- --env production
+
+      - name: Notify team
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        if: always()

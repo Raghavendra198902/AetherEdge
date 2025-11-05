@@ -1,0 +1,541 @@
+# 🛡️ AetherEdge Security Hardening Configuration
+# ===============================================
+# Production-grade security hardening for the entire platform
+
+# Network Security Policies
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aetheredge-network-policy
+  namespace: aetheredge
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: aetheredge
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: aetheredge
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+---
+# Pod Security Standards
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aetheredge
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# RBAC Configuration
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: aetheredge
+  name: aetheredge-service-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions", "networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aetheredge-service-binding
+  namespace: aetheredge
+subjects:
+- kind: ServiceAccount
+  name: aetheredge-service-account
+  namespace: aetheredge
+roleRef:
+  kind: Role
+  name: aetheredge-service-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aetheredge-service-account
+  namespace: aetheredge
+automountServiceAccountToken: false
+
+---
+# Security Context and Pod Security Standards
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aetheredge-secure-pod-template
+  namespace: aetheredge
+spec:
+  serviceAccountName: aetheredge-service-account
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: main
+    image: aetheredge/api-gateway:latest
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 10001
+      runAsGroup: 10001
+      seccompProfile:
+        type: RuntimeDefault
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+        ephemeral-storage: 1Gi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+        ephemeral-storage: 100Mi
+    env:
+    - name: DATABASE_URL
+      valueFrom:
+        secretKeyRef:
+          name: aetheredge-secrets
+          key: database-url
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+    - name: cache
+      mountPath: /app/cache
+  volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: cache
+    emptyDir: {}
+
+---
+# Secrets Management
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aetheredge-secrets
+  namespace: aetheredge
+type: Opaque
+data:
+  # Base64 encoded secrets (these should be managed by external secret management)
+  database-url: ""
+  redis-url: ""
+  jwt-secret: ""
+  encryption-key: ""
+  api-keys: ""
+
+---
+# TLS Configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aetheredge-tls
+  namespace: aetheredge
+type: kubernetes.io/tls
+data:
+  tls.crt: ""  # Base64 encoded certificate
+  tls.key: ""  # Base64 encoded private key
+
+---
+# Ingress with TLS and Security Headers
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aetheredge-ingress
+  namespace: aetheredge
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+    nginx.ingress.kubernetes.io/ssl-ciphers: "ECDHE-RSA-AES128-GCM-SHA256,ECDHE-RSA-AES256-GCM-SHA384"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-Frame-Options "DENY" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';" always;
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - aetheredge.com
+    - api.aetheredge.com
+    secretName: aetheredge-tls
+  rules:
+  - host: aetheredge.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
+  - host: api.aetheredge.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8000
+
+---
+# API Gateway Security Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-security-config
+  namespace: aetheredge
+data:
+  security.yaml: |
+    security:
+      # JWT Configuration
+      jwt:
+        secret_key: ${JWT_SECRET}
+        algorithm: "HS256"
+        access_token_expire_minutes: 30
+        refresh_token_expire_days: 7
+      
+      # Rate Limiting
+      rate_limiting:
+        enabled: true
+        default_limit: "100/minute"
+        burst_limit: "200/minute"
+        per_ip_limit: "50/minute"
+        per_user_limit: "200/minute"
+      
+      # CORS Configuration
+      cors:
+        allow_origins:
+          - "https://aetheredge.com"
+          - "https://app.aetheredge.com"
+        allow_methods:
+          - "GET"
+          - "POST"
+          - "PUT"
+          - "DELETE"
+          - "OPTIONS"
+        allow_headers:
+          - "Authorization"
+          - "Content-Type"
+          - "X-Requested-With"
+        expose_headers:
+          - "X-Total-Count"
+          - "X-Rate-Limit-Remaining"
+        allow_credentials: true
+        max_age: 86400
+      
+      # Input Validation
+      input_validation:
+        max_content_length: 10485760  # 10MB
+        request_timeout: 30
+        max_connections: 1000
+      
+      # Encryption
+      encryption:
+        at_rest:
+          enabled: true
+          algorithm: "AES-256-GCM"
+          key_rotation_days: 90
+        in_transit:
+          tls_version: "1.2"
+          cipher_suites:
+            - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+            - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+      
+      # Audit Logging
+      audit:
+        enabled: true
+        log_level: "INFO"
+        include_request_body: false
+        include_response_body: false
+        log_format: "json"
+        retention_days: 90
+      
+      # Session Management
+      session:
+        secure: true
+        http_only: true
+        same_site: "strict"
+        max_age: 3600
+
+---
+# Database Security Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-security-config
+  namespace: aetheredge
+data:
+  postgresql.conf: |
+    # Connection Security
+    ssl = on
+    ssl_cert_file = '/etc/ssl/certs/server.crt'
+    ssl_key_file = '/etc/ssl/private/server.key'
+    ssl_ca_file = '/etc/ssl/certs/ca.crt'
+    ssl_crl_file = ''
+    ssl_ciphers = 'ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256'
+    ssl_prefer_server_ciphers = on
+    ssl_ecdh_curve = 'prime256v1'
+    
+    # Authentication
+    password_encryption = scram-sha-256
+    
+    # Logging
+    log_connections = on
+    log_disconnections = on
+    log_checkpoints = on
+    log_lock_waits = on
+    log_temp_files = 0
+    log_autovacuum_min_duration = 0
+    log_error_verbosity = verbose
+    
+    # Resource Limits
+    max_connections = 200
+    shared_buffers = 256MB
+    effective_cache_size = 1GB
+    maintenance_work_mem = 64MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    
+    # Security
+    row_security = on
+    
+  pg_hba.conf: |
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+    local   all             postgres                                peer
+    hostssl all             all             0.0.0.0/0               scram-sha-256
+    hostnossl all           all             0.0.0.0/0               reject
+
+---
+# Redis Security Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-security-config
+  namespace: aetheredge
+data:
+  redis.conf: |
+    # Network Security
+    bind 0.0.0.0
+    protected-mode yes
+    port 0
+    tls-port 6379
+    tls-cert-file /etc/ssl/certs/redis.crt
+    tls-key-file /etc/ssl/private/redis.key
+    tls-ca-cert-file /etc/ssl/certs/ca.crt
+    tls-protocols "TLSv1.2 TLSv1.3"
+    tls-ciphers "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256"
+    
+    # Authentication
+    requirepass ${REDIS_PASSWORD}
+    
+    # Disable dangerous commands
+    rename-command FLUSHDB ""
+    rename-command FLUSHALL ""
+    rename-command KEYS ""
+    rename-command CONFIG ""
+    rename-command SHUTDOWN ""
+    rename-command DEBUG ""
+    rename-command EVAL ""
+    rename-command SCRIPT ""
+    
+    # Logging
+    loglevel notice
+    logfile /var/log/redis/redis-server.log
+    
+    # Memory Management
+    maxmemory 1gb
+    maxmemory-policy allkeys-lru
+    
+    # Persistence Security
+    dir /var/lib/redis
+    dbfilename dump.rdb
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+
+---
+# Vulnerability Scanning Policy
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vulnerability-scanning-policy
+  namespace: aetheredge
+data:
+  policy.yaml: |
+    vulnerability_scanning:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      severity_threshold: "HIGH"
+      fail_on_critical: true
+      
+      scanners:
+        - name: "trivy"
+          enabled: true
+          config:
+            skip_dirs:
+              - "/tmp"
+              - "/var/tmp"
+            skip_files:
+              - "*.log"
+        
+        - name: "snyk"
+          enabled: true
+          config:
+            severity_threshold: "high"
+            fail_on: "upgradable"
+      
+      notification:
+        slack:
+          webhook_url: "${SLACK_WEBHOOK_URL}"
+          channel: "#security-alerts"
+        
+        email:
+          enabled: true
+          recipients:
+            - "security@aetheredge.com"
+            - "devops@aetheredge.com"
+
+---
+# Compliance Monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: compliance-config
+  namespace: aetheredge
+data:
+  compliance.yaml: |
+    compliance:
+      frameworks:
+        - name: "SOC2"
+          enabled: true
+          controls:
+            - "CC6.1"  # Logical access controls
+            - "CC6.2"  # Authentication and authorization
+            - "CC6.3"  # Network security
+            - "CC7.1"  # Data transmission controls
+        
+        - name: "ISO27001"
+          enabled: true
+          controls:
+            - "A.9.1.1"  # Access control policy
+            - "A.9.2.1"  # User registration
+            - "A.9.4.1"  # Information access restriction
+            - "A.13.1.1" # Network controls
+        
+        - name: "GDPR"
+          enabled: true
+          requirements:
+            - "data_encryption"
+            - "access_logging"
+            - "data_retention"
+            - "consent_management"
+      
+      monitoring:
+        enabled: true
+        frequency: "daily"
+        reports:
+          - type: "compliance_dashboard"
+            recipients: ["compliance@aetheredge.com"]
+          - type: "security_metrics"
+            recipients: ["security@aetheredge.com"]
+
+---
+# Backup and Disaster Recovery
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-config
+  namespace: aetheredge
+data:
+  backup.yaml: |
+    backup:
+      database:
+        enabled: true
+        schedule: "0 1 * * *"  # Daily at 1 AM
+        retention_days: 30
+        encryption: true
+        compression: true
+        destination: "s3://aetheredge-backups/database"
+      
+      application:
+        enabled: true
+        schedule: "0 0 * * 0"  # Weekly on Sunday
+        retention_weeks: 12
+        include:
+          - "/app/data"
+          - "/app/config"
+        exclude:
+          - "/app/logs"
+          - "/app/tmp"
+        destination: "s3://aetheredge-backups/application"
+      
+      kubernetes:
+        enabled: true
+        schedule: "0 23 * * *"  # Daily at 11 PM
+        retention_days: 7
+        resources:
+          - "deployments"
+          - "services"
+          - "configmaps"
+          - "secrets"
+          - "ingresses"
+        destination: "s3://aetheredge-backups/kubernetes"

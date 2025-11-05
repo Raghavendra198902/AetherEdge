@@ -1,0 +1,15 @@
+# 🔥 Simple Gateway Security-Hardened Dependencies
+# =================================================
+
+# Core FastAPI - Updated to fix ReDoS vulnerability (CVE-2024-24762)
+fastapi>=0.109.1
+
+# HTTP server
+uvicorn[standard]>=0.24.0
+
+# File upload support - Fixed critical resource allocation issue
+python-multipart>=0.0.18
+
+# Authentication & Security - Updated to fix signature verification issues
+python-jose[cryptography]>=3.4.0
+passlib[bcrypt]>=1.7.4

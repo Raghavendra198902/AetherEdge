@@ -1,0 +1,27 @@
+# Lakshmi FinOps Module Requirements
+fastapi==0.104.1
+pydantic==2.5.0
+pydantic-settings==2.1.0
+uvicorn==0.24.0
+sqlalchemy==2.0.23
+alembic==1.13.1
+psycopg2-binary==2.9.9
+redis==5.0.1
+celery==5.3.4
+numpy==1.24.3
+pandas==2.0.3
+boto3==1.29.57
+azure-mgmt-consumption==10.0.0
+azure-mgmt-billing==6.0.0
+google-cloud-billing==1.11.1
+aws-sdk-pandas==3.4.2
+plotly==5.17.0
+dash==2.14.2
+python-multipart==0.0.6
+aiofiles==23.2.1
+httpx==0.25.2
+schedule==1.2.0
+prophet==1.1.4
+statsmodels==0.14.0
+pytest==7.4.3
+pytest-asyncio==0.21.1
