@@ -1,0 +1,69 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: aetheredge-production
+  namespace: aetheredge
+
+resources:
+- ../../base
+
+patches:
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 5
+  target:
+    kind: Deployment
+    name: aetheredge-api
+
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "1Gi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "2Gi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "500m"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "1000m"
+  target:
+    kind: Deployment
+    name: aetheredge-api
+
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/storage
+      value: "50Gi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "4Gi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "2000m"
+  target:
+    kind: Deployment
+    name: postgres
+
+configMapGenerator:
+- name: aetheredge-config
+  behavior: merge
+  literals:
+  - ENVIRONMENT=production
+  - LOG_LEVEL=WARNING
+  - API_WORKERS=4
+
+secretGenerator:
+- name: aetheredge-secrets
+  behavior: merge
+  files:
+  - JWT_SECRET_KEY=jwt-secret.txt
+  - DATABASE_PASSWORD=db-password.txt
+  - OPENAI_API_KEY=openai-key.txt
+
+images:
+- name: ghcr.io/aetheredge/api
+  newTag: "v1.0.0"

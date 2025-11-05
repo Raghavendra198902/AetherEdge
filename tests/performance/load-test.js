@@ -38,11 +38,11 @@ const BASE_URL = __ENV.TARGET_URL || 'http://localhost:8000';
 // Authentication token (if required)
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
 
-// Test data
+// Test data - Using environment variables for security
 const testUsers = [
-  { email: 'admin@aetheredge.com', password: 'admin123' },
-  { email: 'user1@aetheredge.com', password: 'user123' },
-  { email: 'user2@aetheredge.com', password: 'user123' },
+  { email: 'admin@aetheredge.com', password: __ENV.TEST_ADMIN_PASSWORD || 'test-admin' },
+  { email: 'user1@aetheredge.com', password: __ENV.TEST_USER_PASSWORD || 'test-user1' },
+  { email: 'user2@aetheredge.com', password: __ENV.TEST_USER_PASSWORD || 'test-user2' },
 ];
 
 const testQueries = [

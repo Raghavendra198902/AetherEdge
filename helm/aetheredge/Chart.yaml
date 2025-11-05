@@ -1,0 +1,21 @@
+apiVersion: v2
+name: aetheredge
+description: AetherEdge Divine Infrastructure Automation Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/aetheredge/platform
+sources:
+- https://github.com/aetheredge/platform
+maintainers:
+- name: AetherEdge Team
+  email: team@aetheredge.com
+keywords:
+- infrastructure
+- automation
+- ai
+- platform
+- devops
+annotations:
+  category: Infrastructure
+dependencies: []

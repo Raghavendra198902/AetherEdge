@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aetheredge
+  labels:
+    name: aetheredge
+    tier: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aetheredge-monitoring
+  labels:
+    name: aetheredge-monitoring
+    tier: monitoring
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aetheredge-security
+  labels:
+    name: aetheredge-security
+    tier: security

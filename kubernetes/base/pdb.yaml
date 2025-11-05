@@ -1,0 +1,32 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aetheredge-api-pdb
+  namespace: aetheredge
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: aetheredge-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: aetheredge
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: postgres
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: aetheredge
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis
